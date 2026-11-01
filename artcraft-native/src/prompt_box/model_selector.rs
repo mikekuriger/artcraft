@@ -19,8 +19,8 @@ const FLYOUT_WIDTH: f32 = 300.0;
 const PROVIDER_FLYOUT_WIDTH: f32 = 220.0;
 /// Hovering a model this long opens its providers (`providerTooltipDelayMs`).
 const PROVIDER_DELAY_SECS: f64 = 0.3;
-/// How far past a flyout's edge the pointer still counts as being on it, so crossing the gap
-/// between a family's row and its flyout doesn't dismiss the flyout.
+/// How far past a flyout's edge the pointer still counts as being on it, so rows near the
+/// flyout's edge don't dismiss or replace it on the way across.
 const FLYOUT_BRIDGE: f32 = 14.0;
 
 /// What was picked: a model, and the provider when one was chosen with it.
