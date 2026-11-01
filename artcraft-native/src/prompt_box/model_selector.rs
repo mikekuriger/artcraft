@@ -74,7 +74,8 @@ pub fn model_selector(ui: &mut Ui, id: Id, models: &[ModelInfo], selected: Optio
             continue;
           }
           let row = widgets::menu_row(ui, RowLead::Logo(&tex), &family.name, subtitle, false, true, is_open);
-          if row.hovered() || row.clicked() || pointer.is_some_and(|p| row.rect.contains(p)) {
+          let row_hovered = row.hovered() || pointer.is_some_and(|p| row.rect.contains(p));
+          if row.clicked() || (row_hovered && !in_flyout_zone) {
             hovered = Some(family.name.clone());
           }
           if hovered.as_deref() == Some(family.name.as_str()) {
@@ -287,6 +288,93 @@ mod tests {
     }
     harness.run();
     assert!(harness.query_by_label("FAL").is_none(), "no provider list");
+  }
+
+  mod flyout_bridge {
+    use super::*;
+
+    /// Pointer offsets left of a flyout, over the panel. Fixed rather than derived from
+    /// `FLYOUT_BRIDGE`, so that shrinking the bridge fails these tests.
+    const INSIDE_BRIDGE: f32 = 13.0;
+    const OUTSIDE_BRIDGE: f32 = 34.0;
+
+    #[test]
+    fn crossing_the_gap_keeps_the_flyout_and_the_pick_lands() {
+      let mut harness = open_grouped();
+      let row = hover_family(&mut harness, "Seedream");
+      let flyout = flyout_rect(&harness, "Seedream");
+      for x in [flyout.left() - 9.0, flyout.left() - 5.0, flyout.left() - 1.0] {
+        move_to(&mut harness, pos2(x, row.center().y));
+        assert!(harness.query_by_label("Seedream 4.5").is_some(), "flyout open at x={x}");
+      }
+      harness.get_by_label("Seedream 4.5").click();
+      harness.run();
+      assert_eq!(harness.state().picked, vec![("seedream_4p5".to_owned(), None)]);
+    }
+
+    #[test]
+    fn leaving_past_the_far_side_keeps_the_flyout_until_a_click_outside() {
+      let mut harness = open_grouped();
+      let row = hover_family(&mut harness, "Seedream");
+      let flyout = flyout_rect(&harness, "Seedream");
+      let beyond = pos2(flyout.right() + 100.0, row.center().y);
+      move_to(&mut harness, beyond);
+      assert!(harness.query_by_label("Seedream 4.5").is_some(), "flyout stays with the pointer away");
+      harness.event(egui::Event::PointerButton { pos: beyond, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+      harness.event(egui::Event::PointerButton { pos: beyond, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+      harness.run();
+      assert!(harness.query_by_label("Seedream 4.5").is_none(), "a click outside closes it");
+    }
+
+    #[test]
+    fn a_single_model_row_only_dismisses_outside_the_bridge() {
+      let mut harness = open_grouped();
+      hover_family(&mut harness, "GPT Image");
+      let flyout = flyout_rect(&harness, "GPT Image");
+      let flux_y = harness.get_by_label("Flux 1 Dev").rect().center().y;
+      assert!(flux_y < flyout.bottom() + INSIDE_BRIDGE, "the Flux row must sit inside the bridge's vertical span");
+      move_to(&mut harness, pos2(flyout.left() - INSIDE_BRIDGE, flux_y));
+      assert!(harness.query_by_label("GPT Image 2").is_some(), "inside the bridge");
+      move_to(&mut harness, pos2(flyout.left() - OUTSIDE_BRIDGE, flux_y));
+      assert!(harness.query_by_label("GPT Image 2").is_none(), "outside the bridge");
+    }
+
+    #[test]
+    fn a_diagonal_across_a_neighbouring_family_keeps_the_flyout() {
+      let mut harness = open_grouped();
+      hover_family(&mut harness, "Seedream");
+      let flyout = flyout_rect(&harness, "Seedream");
+      let gpt_y = harness.get_by_label("GPT Image").rect().center().y;
+      assert!(gpt_y < flyout.bottom(), "the neighbouring row must sit beside the flyout");
+      move_to(&mut harness, pos2(flyout.left() - INSIDE_BRIDGE, gpt_y));
+      assert!(harness.query_by_label("Seedream 4.5").is_some(), "a neighbour inside the bridge shouldn't steal the flyout");
+    }
+
+    fn open_grouped() -> Harness<'static, State> {
+      let mut harness = build_with(&["nano_banana", "nano_banana_pro", "nano_banana_2", "seedream_4", "seedream_4p5", "flux_1_dev", "gpt_image_1", "gpt_image_2"]);
+      for m in &mut harness.state_mut().models {
+        m.family = if m.id.starts_with("nano") { "Nano Banana" } else if m.id.starts_with("seedream") { "Seedream" } else if m.id.starts_with("gpt") { "GPT Image" } else { "Flux" }.to_owned();
+      }
+      harness.run();
+      harness.get_by_label("Nano Banana").click();
+      harness.run();
+      harness
+    }
+
+    fn hover_family(harness: &mut Harness<'static, State>, family: &str) -> Rect {
+      let row = harness.get_by_label(family).rect();
+      move_to(harness, row.center());
+      row
+    }
+
+    fn move_to(harness: &mut Harness<'static, State>, pos: egui::Pos2) {
+      harness.hover_at(pos);
+      harness.run();
+    }
+
+    fn flyout_rect(harness: &Harness<'static, State>, family: &str) -> Rect {
+      harness.ctx.data(|d| d.get_temp::<Rect>(flyout_rect_id(Id::new("test-model"), family))).expect("the flyout was drawn")
+    }
   }
 
   fn build() -> Harness<'static, State> {
